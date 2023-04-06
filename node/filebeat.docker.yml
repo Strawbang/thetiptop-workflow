@@ -1,0 +1,43 @@
+filebeat.config:
+  modules:
+    path: ${path.config}/modules.d/*.yml
+    reload.enabled: false
+
+filebeat.modules:
+  # - module: traefik
+  #   access:
+  #     enabled: true
+  #     var.paths: ["/var/log/traefik/access.log*"]
+  - module: system
+    syslog:
+      enabled: true
+      var.paths: ["/var/log/traefik/syslog*"]
+    auth:
+      enabled: true
+      var.paths: ["/var/log/traefik/auth.log*"]
+  # - mysql
+  # - docker
+
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      hints.enabled: true
+
+setup.dashboards:
+  enabled: true
+
+setup.kibana:
+  host: '${KIBANA_HOST:kibana:5601}'
+
+processors:
+- add_cloud_metadata: ~
+- add_docker_metadata: ~
+- add_locale:
+    format: offset
+- add_host_metadata:
+    netinfo.enabled: true
+
+output.elasticsearch:
+  hosts: '${ELASTICSEARCH_HOSTS:elasticsearch:9200}'
+  username: '${ELASTICSEARCH_USERNAME:}'
+  password: '${ELASTICSEARCH_PASSWORD:}'

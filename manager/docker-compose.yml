@@ -1,0 +1,367 @@
+version: "3.3"
+
+networks:
+  private:
+    external:
+      name: private
+  web:
+    external:
+      name: web
+  portainer_agent:
+    external:
+      name: portainer_agent
+
+volumes:
+  portainer-data:
+
+services:
+  # ---- ---- ---- ----
+  # Traefik
+  # ---- ---- ---- ----
+  traefik:
+    image: traefik:v2.4.2
+    ports:
+      - target: 80
+        published: 80
+        mode: host
+      - target: 443
+        published: 443
+        mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # readonly
+      - /var/docker/letsencrypt:/letsencrypt
+      - /var/log:/path/to
+    networks:
+      - web
+    command:
+      - --api=true
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --accesslog=true
+      - --accesslog.filepath=/path/to/access.log
+      - --log.filePath=/path/to/traefik.log
+      - --log.format=json
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      - --providers.docker.watch=true
+      - --providers.docker.network=web
+      - --providers.docker.exposedbydefault=false
+      - --log.level=DEBUG
+      - --providers.docker.swarmMode=true
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt.acme.email=dbougouffa@gmail.com
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.traefik.tls=true
+        - traefik.http.routers.traefik.rule=Host(`traefik.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.traefik.entrypoints=websecure
+        - traefik.http.services.traefik.loadbalancer.server.port=8080
+        - traefik.http.routers.traefik.tls.certresolver=letsencrypt
+  # ---- ---- ---- ----
+  # Gogs
+  # ---- ---- ---- ----
+  gogs-db:
+    image: postgres:13-alpine
+    volumes:
+      - /var/docker/data/gogs/postgres:/var/lib/postgresql/data
+    networks:
+      - private
+    environment:
+      - POSTGRES_DB=gogs
+      - POSTGRES_USER=gogs
+      - POSTGRES_PASSWORD=gogs
+
+  gogs:
+    image: gogs/gogs:0.12
+    ports:
+      - 2222:2222
+    volumes:
+      - /var/docker/data/gogs/data:/data
+    networks:
+      - private
+      - web
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.gogs.tls=true
+        - traefik.http.routers.gogs.rule=Host(`gogs.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.gogs.entrypoints=websecure
+        - traefik.http.services.gogs.loadbalancer.server.port=3000
+        - traefik.http.routers.gogs.tls.certresolver=letsencrypt
+  # ---- ---- ---- ----
+  # mariadb
+  # ---- ---- ---- ----
+  mariadb:
+    image: mariadb:10.5.9-focal
+    ports:
+      - 3306
+    volumes:
+      - /var/docker/data/mysql:/var/lib/mysql
+      - /var/docker/data/mysql/config:/etc/mysql/conf.d
+      - /var/docker/data/mysql/database:/home
+    networks:
+      - private
+    environment:
+      - MYSQL_ROOT_PASSWORD=Dsp8908Archi
+      - MYSQL_PASSWORD=Dsp8908Archi
+      - MYSQL_DATABASE=thetiptop
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+  # ---- ---- ---- ----
+  # phpmyadmin
+  # ---- ---- ---- ----
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    environment:
+      - UPLOAD_LIMIT=1G
+      - PMA_HOSTS=mariadb
+      - MYSQL_PASSWORD=Dsp8908Archi
+    networks:
+      - private
+      - web
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.phpmyadmin.tls=true
+        - traefik.http.routers.phpmyadmin.rule=Host(`pma.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.phpmyadmin.entrypoints=websecure
+        - traefik.http.services.phpmyadmin.loadbalancer.server.port=80
+        - traefik.http.routers.phpmyadmin.tls.certresolver=letsencrypt
+  # ---- ---- ---- ----
+  # jenkins
+  # ---- ---- ---- ----
+  jenkins:
+    user: root
+    # privileged: true
+    image: jenkins/jenkins:2.346.2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/docker/data/jenkins:/var/jenkins_home
+    command: bash -ci "apt-get update && apt-get install curl -y && curl -fsSL https://get.docker.com | sh && groupmod -g 998 docker && usermod -aG docker jenkins && /sbin/tini /usr/local/bin/jenkins.sh"
+    networks:
+      - web
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.jenkins.tls=true
+        - traefik.http.routers.jenkins.rule=Host(`jenkins.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.jenkins.entrypoints=websecure
+        - traefik.http.services.jenkins.loadbalancer.server.port=8080
+        - traefik.http.routers.jenkins.tls.certresolver=letsencrypt
+  # ---- ---- ---- ----
+  # nexus 3
+  # ---- ---- ---- ----
+  nexus:
+    image: sonatype/nexus3
+    ports:
+      - 8082:8082
+    volumes:
+      - ./data/nexus:/nexus-data
+    networks:
+      - web
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.nexus.tls=true
+        - traefik.http.routers.nexus.rule=Host(`nexus.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.nexus.entrypoints=websecure
+        - traefik.http.services.nexus.loadbalancer.server.port=8081
+        - traefik.http.routers.nexus.tls.certresolver=letsencrypt
+        - traefik.http.routers.nexus.service=nexus
+        - traefik.http.routers.repo.tls=true
+        - traefik.http.routers.repo.rule=Host(`repo.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.repo.entrypoints=websecure
+        - traefik.http.services.repo.loadbalancer.server.port=8082
+        - traefik.http.routers.repo.tls.certresolver=letsencrypt
+        - traefik.http.routers.repo.service=repo
+  # ---- ---- ---- ----
+  # sonar qube
+  # ---- ---- ---- ----
+  sonarqube:
+    image: sonarqube:latest
+    networks:
+      - web
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.sonarqube.tls=true
+        - traefik.http.routers.sonarqube.rule=Host(`sonarqube.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.sonarqube.entrypoints=websecure
+        - traefik.http.services.sonarqube.loadbalancer.server.port=9000
+        - traefik.http.routers.sonarqube.tls.certresolver=letsencrypt
+  # ---- ---- ---- ----
+  # elasticsearch
+  # ---- ---- ---- ----
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.2.1
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms4g -Xmx4g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - /var/docker/data/elasticsearch:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+  # ---- ---- ---- ----
+  # elasticsearch curator
+  # ---- ---- ---- ----
+  es-curator:
+    image: bitnami/elasticsearch-curator:latest
+    volumes:
+      - ./deleteindices.yml:/etc/elasticsearch/deleteindices.yml:ro
+      - ./config.yml:/etc/elasticsearch/config.yml:ro
+    networks:
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    command: curator --config /etc/elasticsearch/config.yml  /etc/elasticsearch/deleteindices.yml
+  # ---- ---- ---- ----
+  # kibana
+  # ---- ---- ---- ----
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.2.1
+    environment:
+      - ELASTICSEARCH_HOSTS=["http://es01:9200"]
+      - SERVER_PUBLICBASEURL="https://kibana.dsp-archiwebo20-db-od-sn-bm.fr"
+    networks:
+      - web
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.kibana.tls=true
+        - traefik.http.routers.kibana.rule=Host(`kibana.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.kibana.entrypoints=websecure
+        - traefik.http.services.kibana.loadbalancer.server.port=5601
+        - traefik.http.routers.kibana.tls.certresolver=letsencrypt
+  # ---- ---- ---- ----
+  # metricbeat
+  # ---- ---- ---- ----
+  metricbeats:
+    user: root
+    image: docker.elastic.co/beats/metricbeat:8.2.1
+    environment:
+      - ELASTICSEARCH_HOSTS=["http://es01:9200"]
+      - KIBANA_HOST=http://kibana:5601
+    networks:
+      - private
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /:/hostfs:ro
+      - ./metricbeat.docker.yml:/usr/share/metricbeat/metricbeat.yml:ro
+    command: ["--strict.perms=false"]
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
+  # ---- ---- ---- ----
+  # filebeat
+  # ---- ---- ---- ----
+  filebeat:
+    user: root
+    image: docker.elastic.co/beats/filebeat:8.2.1
+    environment:
+      - ELASTICSEARCH_HOSTS=["http://es01:9200"]
+      - KIBANA_HOST=http://kibana:5601
+    networks:
+      - private
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers/:/var/lib/docker/containers/:ro
+      - ./filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/log:/var/log/traefik/
+    command: ["--strict.perms=false"]
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
+  # ---- ---- ---- ----
+  # portainer
+  # ---- ---- ---- ----
+  portainer:
+    image: portainer/portainer-ce:2.5.1
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    volumes:
+      - /var/docker/data/portainer:/data
+    networks:
+      - portainer_agent
+      - web
+      - private
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.portainer.tls=true
+        - traefik.http.routers.portainer.rule=Host(`portainer.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.portainer.entrypoints=websecure
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+        - traefik.http.routers.portainer.tls.certresolver=letsencrypt
+        - traefik.http.routers.portainer.service=portainer
+        - traefik.http.routers.edge.tls=true
+        - traefik.http.routers.edge.rule=Host(`edge.dsp-archiwebo20-db-od-sn-bm.fr`)
+        - traefik.http.routers.edge.entrypoints=websecure
+        - traefik.http.services.edge.loadbalancer.server.port=8000
+        - traefik.http.routers.edge.tls.certresolver=letsencrypt
+        - traefik.http.routers.edge.service=edge
+  # ---- ---- ---- ----
+  # portainer agent
+  # ---- ---- ---- ----
+  agent:
+    image: portainer/agent:2.5.1
+    environment:
+      AGENT_CLUSTER_ADDR: tasks.agent
+      LOG_LEVEL: DEBUG
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    ports:
+      - target: 9001
+        published: 9001
+        protocol: tcp
+        mode: host
+    networks:
+      - portainer_agent
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
