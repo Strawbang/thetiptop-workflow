@@ -1,0 +1,9 @@
+[submodule "thetiptop-api"]
+	path = thetiptop-api
+	url = https://github.com/Strawbang/thetiptop-api
+[submodule "thetiptop-front"]
+	path = thetiptop-front
+	url = https://github.com/Strawbang/thetiptop-front
+[submodule "thetiptop-back"]
+	path = thetiptop-back
+	url = https://github.com/Strawbang/thetiptop-back   
